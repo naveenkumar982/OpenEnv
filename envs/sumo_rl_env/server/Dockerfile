@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-ARG BASE_IMAGE=ghcr.io/meta-pytorch/openenv-base:latest
+ARG BASE_IMAGE=ghcr.io/huggingface/openenv-base:latest
 FROM ${BASE_IMAGE} AS builder
 
 WORKDIR /app
@@ -65,6 +65,7 @@ ENV SUMO_MIN_GREEN=5
 ENV SUMO_MAX_GREEN=50
 ENV SUMO_REWARD_FN=diff-waiting-time
 ENV SUMO_SEED=42
+ENV ENABLE_WEB_INTERFACE=true
 
 EXPOSE 8000
 
