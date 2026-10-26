@@ -564,8 +564,12 @@ class CloudSREEnvironment(Environment):
         self._cost_drift: float = 0.0
         self._sre_state = SREState()
 
-    def reset(self, task_id: str = "phantom_volume_cleanup",
-              seed: Optional[int] = None) -> SREObservation:
+    def reset(
+        self,
+        task_id: str = "phantom_volume_cleanup",
+        seed: Optional[int] = None,
+        episode_id: Optional[str] = None,
+    ) -> SREObservation:
         """Reset to a specific task's initial state."""
         task_cls = TASK_REGISTRY.get(task_id)
         if task_cls is None:
@@ -584,7 +588,7 @@ class CloudSREEnvironment(Environment):
         self._cost_drift = 0.0
 
         self._sre_state = SREState(
-            episode_id=str(uuid.uuid4()),
+            episode_id=episode_id if episode_id is not None else str(uuid.uuid4()),
             task_id=task_id,
         )
 

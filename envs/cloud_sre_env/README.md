@@ -26,8 +26,10 @@ breakdown are not added to the step reward or returned by the environment
 protocol. Training therefore uses the shaping reward; use `grade()` for
 evaluation and task-level reporting. Keeping these signals separate avoids
 mixing a delayed episode score into the per-action reward scale. A training
-pipeline that needs the task score must call the evaluator after the episode
-and record that score separately.
+pipeline that needs the task score must currently run in-process with the
+environment and call `env.grade()` after the episode. `CloudSREEnv` does not
+expose this evaluator over WebSocket; remote clients receive shaping rewards
+only.
 
 ## Tasks
 
@@ -61,25 +63,18 @@ docker build -t cloud-sre-env:latest -f envs/cloud_sre_env/server/Dockerfile .
 ```python
 from envs.cloud_sre_env import SREAction, CloudSREEnv
 
-# Connect to the Docker container
-client = CloudSREEnv.from_docker_image("cloud-sre-env:latest")
-
-# Reset to a task
-result = client.reset()
-
-# Take actions
-result = client.step(SREAction(command="inspect", resource_id="ec2-web-001"))
-result = client.step(SREAction(command="terminate", resource_id="ebs-orphan-001"))
-
-# Get state
-state = client.state()
-print(f"Step: {state.current_step}, Reward: {state.cumulative_reward}")
-
-# Cleanup
-client.close()
+# Start the container and use the synchronous client facade.
+with CloudSREEnv.from_docker_image("cloud-sre-env:latest").sync() as client:
+    result = client.reset()
+    result = client.step(SREAction(command="inspect", resource_id="ec2-web-001"))
+    result = client.step(SREAction(command="terminate", resource_id="ebs-orphan-001"))
+    state = client.state()
+    print(f"Step: {state.current_step}, Reward: {state.cumulative_reward}")
 ```
 
 ### Direct Python Usage (no Docker)
+Run from the repository checkout with `PYTHONPATH=src:envs`.
+
 ```python
 from cloud_sre_env.server.cloud_sre_environment import CloudSREEnvironment
 from cloud_sre_env.models import SREAction
@@ -130,7 +125,7 @@ print(f"Score: {score}, Breakdown: {breakdown}")
 ```
 cloud_sre_env/
 ├── __init__.py                          # Exports SREAction, SREObservation, SREState, CloudSREEnv
-├── models.py                            # Typed dataclass models (Action, Observation, State)
+├── models.py                            # Pydantic wire models (Action, Observation, State)
 ├── client.py                            # EnvClient subclass for HTTP/Docker communication
 ├── openenv.yaml                         # Environment manifest
 ├── README.md                            # This file
@@ -145,7 +140,7 @@ cloud_sre_env/
 ## Testing
 
 ```bash
-pytest tests/test_cloud_sre_environment.py -v
+PYTHONPATH=src:envs uv run pytest tests/envs/test_cloud_sre_environment.py -v
 ```
 
 ## License

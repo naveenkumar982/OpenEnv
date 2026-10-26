@@ -205,3 +205,13 @@ def test_server_app_uses_environment_factory():
     from cloud_sre_env.server.app import app
 
     assert app.title == "OpenEnv Environment HTTP API"
+
+
+def test_reset_preserves_requested_episode_id_and_seed():
+    env = CloudSREEnvironment()
+    first = env.reset(seed=42, episode_id="requested-episode")
+    assert env.state.episode_id == "requested-episode"
+    second = env.reset(seed=42)
+    assert env.state.episode_id
+    assert env.state.episode_id != "requested-episode"
+    assert second.resources == first.resources
