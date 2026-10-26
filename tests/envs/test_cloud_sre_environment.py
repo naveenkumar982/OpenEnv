@@ -6,10 +6,12 @@ and seeded states, plus grading correctness.
 """
 
 import pytest
+from cloud_sre_env.models import SREAction
 from cloud_sre_env.server.cloud_sre_environment import (
-    CloudSREEnvironment, TASK_REGISTRY,
+    CHAOS_EVENTS,
+    CloudSREEnvironment,
+    TASK_REGISTRY,
 )
-from cloud_sre_env.models import SREAction, ActionCommand
 
 
 class TestEnvironmentBasics:
@@ -95,8 +97,13 @@ class TestTask2LatencySpikeRemediation:
     def test_scaling_rds_scores(self):
         env = CloudSREEnvironment()
         env.reset(task_id="latency_spike_remediation")
-        env.step(SREAction(command="scale", resource_id="rds-primary-001",
-                           params={"target_size": "db.t3.medium"}))
+        env.step(
+            SREAction(
+                command="scale",
+                resource_id="rds-primary-001",
+                params={"target_size": "db.t3.medium"},
+            )
+        )
         score, breakdown = env.grade()
         assert score >= 0.7
         assert breakdown["rds_scaled"] is True
@@ -144,13 +151,57 @@ def test_step_rewards_and_terminal_flag_reach_client():
     client = CloudSREEnv.__new__(CloudSREEnv)
     for step in range(15):
         obs = env.step(SREAction(command="wait"))
-        result = client._parse_result({
-            "observation": serialize_observation(obs),
-            "reward": obs.reward,
-            "done": obs.done,
-        })
+        result = client._parse_result(serialize_observation(obs))
         assert result.reward == pytest.approx(-0.01)
         assert result.observation.reward == result.reward
         assert result.done is (step == 14)
         assert result.observation.done == result.done
+        assert result.observation.step_number == step + 1
     assert env.step(SREAction(command="wait")).reward == 0.0
+
+
+def test_cost_drift_chaos_survives_state_recalculation():
+    import random
+
+    def event_for_seed(candidate):
+        rng = random.Random(candidate * 1000 + 4)
+        if rng.random() > 0.25:
+            return None
+        return rng.choice(CHAOS_EVENTS)["type"]
+
+    seed = next(
+        candidate
+        for candidate in range(1000)
+        if event_for_seed(candidate) == "cost_drift"
+    )
+    env = CloudSREEnvironment()
+    env.reset(task_id="phantom_volume_cleanup", seed=seed)
+    for _ in range(4):
+        observation = env.step(SREAction(command="wait"))
+
+    resource_cost = sum(r["cost_per_hour"] for r in observation.resources)
+    assert observation.total_hourly_cost > resource_cost
+    drifted_cost = observation.total_hourly_cost
+    env._recalculate_state()
+    assert env._build_observation().total_hourly_cost == drifted_cost
+
+
+def test_scale_reward_uses_pre_mutation_cpu():
+    env = CloudSREEnvironment()
+    env.reset(task_id="latency_spike_remediation")
+    observation = env.step(
+        SREAction(
+            command="scale",
+            resource_id="rds-primary-001",
+            params={"target_size": "db.t3.medium"},
+        )
+    )
+    assert observation.reward == pytest.approx(0.13)
+    rds = next(r for r in observation.resources if r["id"] == "rds-primary-001")
+    assert rds["cpu_utilization"] == 45.0
+
+
+def test_server_app_uses_environment_factory():
+    from cloud_sre_env.server.app import app
+
+    assert app.title == "OpenEnv Environment HTTP API"

@@ -14,6 +14,21 @@ The agent manages a simulated cloud infrastructure: diagnosing outages, terminat
 | **Chaos Injection** | Random cost spikes, CPU anomalies, and spurious alerts |
 | **Zero Dependencies** | No external API keys or cloud accounts needed |
 
+## Reward and grading decision
+
+`step()` returns the per-action shaping reward in the observation. It gives
+immediate feedback for useful and harmful operations, including penalties for
+waiting or damaging production resources. The cumulative sum is available in
+`state.cumulative_reward`.
+
+`grade()` is a separate deterministic episode evaluator. Its task score and
+breakdown are not added to the step reward or returned by the environment
+protocol. Training therefore uses the shaping reward; use `grade()` for
+evaluation and task-level reporting. Keeping these signals separate avoids
+mixing a delayed episode score into the per-action reward scale. A training
+pipeline that needs the task score must call the evaluator after the episode
+and record that score separately.
+
 ## Tasks
 
 ### 1. Phantom Volume Cleanup (Easy)

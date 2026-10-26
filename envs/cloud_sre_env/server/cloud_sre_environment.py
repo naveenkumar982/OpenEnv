@@ -561,6 +561,7 @@ class CloudSREEnvironment(Environment):
         self._cumulative_reward: float = 0.0
         self._seed: Optional[int] = None
         self._chaos_enabled: bool = False
+        self._cost_drift: float = 0.0
         self._sre_state = SREState()
 
     def reset(self, task_id: str = "phantom_volume_cleanup",
@@ -580,6 +581,7 @@ class CloudSREEnvironment(Environment):
         self._done = False
         self._cumulative_reward = 0.0
         self._chaos_enabled = seed is not None
+        self._cost_drift = 0.0
 
         self._sre_state = SREState(
             episode_id=str(uuid.uuid4()),
@@ -764,7 +766,10 @@ class CloudSREEnvironment(Environment):
 
     def _recalculate_state(self):
         self._env_state["total_hourly_cost"] = round(
-            sum(r.get("cost_per_hour", 0) for r in self._env_state.get("resources", [])), 4)
+            sum(r.get("cost_per_hour", 0) for r in self._env_state.get("resources", []))
+            + self._cost_drift,
+            4,
+        )
         critical = [a for a in self._env_state.get("alerts", []) if a.get("severity") == "critical"]
         if not critical:
             self._env_state["system_uptime"] = min(100.0, self._env_state.get("system_uptime", 100) + 10.0)
@@ -788,5 +793,4 @@ class CloudSREEnvironment(Environment):
                 target["cpu_utilization"] = round(rng.uniform(88, 96), 1)
         elif event["type"] == "cost_drift":
             drift = round(rng.uniform(0.05, 0.20), 4)
-            self._env_state["total_hourly_cost"] = round(
-                self._env_state.get("total_hourly_cost", 0) + drift, 4)
+            self._cost_drift = round(self._cost_drift + drift, 4)
