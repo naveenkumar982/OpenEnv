@@ -5,7 +5,8 @@ Implements EnvClient for communicating with the Cloud SRE environment
 via WebSocket/HTTP when deployed as a Docker container or HF Space.
 """
 
-from openenv.core import EnvClient, StepResult
+from openenv.core import EnvClient
+from openenv.core.client_types import StepResult
 from .models import SREAction, SREObservation, SREState
 
 
@@ -37,6 +38,8 @@ class CloudSREEnv(EnvClient[SREAction, SREObservation, SREState]):
         """Deserialize the server response into a typed StepResult."""
         obs_data = payload.get("observation", {})
         obs = SREObservation(
+            reward=payload.get("reward", 0.0),
+            done=payload.get("done", False),
             resources=obs_data.get("resources", []),
             alerts=obs_data.get("alerts", []),
             total_hourly_cost=obs_data.get("total_hourly_cost", 0.0),

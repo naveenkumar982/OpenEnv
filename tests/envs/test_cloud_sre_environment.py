@@ -133,3 +133,24 @@ class TestAllTasksRegistered:
         assert "phantom_volume_cleanup" in TASK_REGISTRY
         assert "latency_spike_remediation" in TASK_REGISTRY
         assert "noisy_neighbor_incident" in TASK_REGISTRY
+
+
+def test_step_rewards_and_terminal_flag_reach_client():
+    from cloud_sre_env.client import CloudSREEnv
+    from openenv.core.env_server.serialization import serialize_observation
+
+    env = CloudSREEnvironment()
+    env.reset(task_id="phantom_volume_cleanup")
+    client = CloudSREEnv.__new__(CloudSREEnv)
+    for step in range(15):
+        obs = env.step(SREAction(command="wait"))
+        result = client._parse_result({
+            "observation": serialize_observation(obs),
+            "reward": obs.reward,
+            "done": obs.done,
+        })
+        assert result.reward == pytest.approx(-0.01)
+        assert result.observation.reward == result.reward
+        assert result.done is (step == 14)
+        assert result.observation.done == result.done
+    assert env.step(SREAction(command="wait")).reward == 0.0

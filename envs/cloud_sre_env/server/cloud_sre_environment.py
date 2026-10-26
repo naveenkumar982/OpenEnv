@@ -634,7 +634,7 @@ class CloudSREEnvironment(Environment):
         self._sre_state.cumulative_reward = round(self._cumulative_reward, 4)
         self._sre_state.action_count = len(self._action_history)
 
-        return self._build_observation()
+        return self._build_observation(reward=step_reward)
 
     @property
     def state(self) -> SREState:
@@ -649,8 +649,10 @@ class CloudSREEnvironment(Environment):
 
     # ── Observation builder ──
 
-    def _build_observation(self) -> SREObservation:
+    def _build_observation(self, reward: float = 0.0) -> SREObservation:
         return SREObservation(
+            reward=reward,
+            done=self._done,
             resources=self._env_state.get("resources", []),
             alerts=self._env_state.get("alerts", []),
             total_hourly_cost=self._env_state.get("total_hourly_cost", 0.0),
