@@ -215,3 +215,104 @@ def test_reset_preserves_requested_episode_id_and_seed():
     assert env.state.episode_id
     assert env.state.episode_id != "requested-episode"
     assert second.resources == first.resources
+
+
+@pytest.mark.parametrize("transport", ["http", "websocket"])
+def test_app_exposes_complete_episode_state(transport):
+    from cloud_sre_env.models import SREState
+    from cloud_sre_env.server.app import app
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as client:
+        schema = client.get("/schema").json()
+        assert schema["state"] == SREState.model_json_schema()
+        reset = {"task_id": "phantom_volume_cleanup", "episode_id": "state-test"}
+        if transport == "http":
+            response = client.get("/state")
+            assert response.status_code == 200
+            assert response.json() == SREState().model_dump()
+            return
+        else:
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({"type": "reset", "data": reset})
+                assert ws.receive_json()["type"] == "observation"
+                ws.send_json({"type": "step", "data": {"command": "wait"}})
+                assert ws.receive_json()["type"] == "observation"
+                ws.send_json({"type": "state"})
+                response = ws.receive_json()
+                assert response["type"] == "state"
+                state = response["data"]
+        assert state == {
+            "episode_id": "state-test",
+            "step_count": 1,
+            "task_id": "phantom_volume_cleanup",
+            "current_step": 1,
+            "done": False,
+            "cumulative_reward": -0.01,
+            "action_count": 1,
+        }
+
+
+@pytest.mark.parametrize(
+    "commands, expected_score, inspected",
+    [
+        (["inspect"], 0.2, True),
+        (["inspect", "wait"], 0.2, True),
+        (["inspect", "inspect"], 0.2, True),
+        (["terminate"], 0.3, False),
+        (["inspect", "terminate"], 0.5, True),
+        (["terminate", "inspect"], 0.3, False),
+    ],
+)
+def test_rogue_inspection_is_independent(commands, expected_score, inspected):
+    env = CloudSREEnvironment()
+    env.reset(task_id="noisy_neighbor_incident")
+    for command in commands:
+        env.step(SREAction(command=command, resource_id="ec2-rogue-test-001"))
+    score, breakdown = env.grade()
+    assert score == expected_score
+    assert breakdown["inspected_rogue"] is inspected
+
+
+@pytest.mark.parametrize(
+    "resource_id", ["ec2-app-001", "rds-primary-001", "alb-main-001"]
+)
+def test_production_termination_penalizes_reward_and_grade(resource_id):
+    env = CloudSREEnvironment()
+    env.reset(task_id="latency_spike_remediation")
+    observation = env.step(SREAction(command="terminate", resource_id=resource_id))
+    assert observation.reward == pytest.approx(-0.15)
+    score, breakdown = env.grade()
+    assert breakdown["under_budget"] is True
+    assert breakdown["penalties"] == pytest.approx(0.3)
+    assert score == 0.0
+
+
+@pytest.mark.parametrize(
+    "resource_id, expected", [("ebs-orphan-001", 0.078), ("ebs-data-001", -0.1)]
+)
+def test_volume_termination_rewards_unchanged(resource_id, expected):
+    env = CloudSREEnvironment()
+    env.reset(task_id="phantom_volume_cleanup")
+    observation = env.step(SREAction(command="terminate", resource_id=resource_id))
+    assert observation.reward == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "resource_type", ["ec2_instance", "rds_database", "alb_load_balancer"]
+)
+def test_task2_grade_penalizes_production_by_identity(resource_type):
+    env = CloudSREEnvironment()
+    env.reset(task_id="latency_spike_remediation", seed=42)
+    initial = env._initial_state
+    resource = next(r for r in initial["resources"] if r["type"] == resource_type)
+    # Grading must use resource metadata, not an ID prefix.
+    resource["id"] = "production-resource"
+    score, breakdown = env._task.grade(
+        [{"command": "terminate", "resource_id": resource["id"]}],
+        {"total_hourly_cost": 0},
+        initial,
+    )
+    assert score == 0.0
+    assert breakdown["prod_terminated"] == [resource["id"]]
+    assert breakdown["penalties"] == pytest.approx(0.3)

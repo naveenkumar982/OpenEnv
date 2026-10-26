@@ -337,7 +337,9 @@ class Task2LatencySpikeRemediation:
     def grade(self, action_history: List[Dict], final_state: Dict, initial_state: Dict) -> Tuple[float, Dict]:
         score = 0.0
         breakdown = {"rds_scaled": False, "under_budget": False, "alert_resolved": False,
-                     "ec2s_terminated": [], "penalties": 0.0}
+                     "ec2s_terminated": [], "prod_terminated": [], "penalties": 0.0}
+        prod_ids = {r["id"] for r in initial_state["resources"]
+                    if r.get("tags", {}).get("env") == "prod"}
         valid_sizes = ["db.t3.medium", "db.t3.large", "db.t3.xlarge"]
 
         for entry in action_history:
@@ -347,6 +349,8 @@ class Task2LatencySpikeRemediation:
                 breakdown["rds_scaled"] = True
             if cmd == "terminate" and rid and rid.startswith("ec2"):
                 breakdown["ec2s_terminated"].append(rid)
+            if cmd == "terminate" and rid in prod_ids:
+                breakdown["prod_terminated"].append(rid)
 
         if breakdown["rds_scaled"]:
             score += 0.40
@@ -356,7 +360,7 @@ class Task2LatencySpikeRemediation:
         if final_state.get("total_hourly_cost", 999) <= budget:
             breakdown["under_budget"] = True
             score += 0.30
-        for _ in breakdown["ec2s_terminated"]:
+        for _ in breakdown["prod_terminated"]:
             score -= 0.30
             breakdown["penalties"] += 0.30
 
@@ -493,15 +497,12 @@ class Task3NoisyNeighborIncident:
                      "rebooted_backend": False, "alerts_resolved": False,
                      "prod_terminated": [], "penalties": 0.0}
 
-        has_inspected_rogue = False
         for entry in action_history:
             cmd, rid = entry.get("command"), entry.get("resource_id")
-            if cmd == "inspect" and rid == self.rogue_id:
-                has_inspected_rogue = True
+            if cmd == "inspect" and rid == self.rogue_id and not breakdown["terminated_rogue"]:
+                breakdown["inspected_rogue"] = True
             if cmd == "terminate" and rid == self.rogue_id:
                 breakdown["terminated_rogue"] = True
-                if has_inspected_rogue:
-                    breakdown["inspected_rogue"] = True
             if cmd == "reboot" and rid == self.backend_id:
                 breakdown["rebooted_backend"] = True
             if cmd == "terminate" and rid in self.prod_ids:
@@ -696,7 +697,9 @@ class CloudSREEnvironment(Environment):
         is_attached_ebs = (resource.get("type") == ResourceType.EBS.value
                            and resource.get("status") == ResourceStatus.IN_USE.value)
 
-        if is_prod and resource.get("type") == ResourceType.EC2.value:
+        if is_prod and resource.get("type") in (
+            ResourceType.EC2.value, ResourceType.RDS.value, ResourceType.ALB.value
+        ):
             reward = -0.15
         elif is_attached_ebs:
             reward = -0.10
